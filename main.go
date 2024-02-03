@@ -32,7 +32,7 @@ func fetch(url string, options RequestOptions) (*http.Response, error) {
 
 func getJson() string {
 	res, err := fetch(
-		"https://jsonplaceholder.typicode.com/users/1",
+		"https://jsonplaceholder.typicode.com/users",
 		RequestOptions{Method: "GET"},
 	)
 
@@ -41,7 +41,7 @@ func getJson() string {
 
 	body := ""
 	scanner := bufio.NewScanner(res.Body)
-	for i := 0; scanner.Scan() && i < 5; i++ {
+	for i := 0; scanner.Scan(); i++ {
 		body = body + scanner.Text()
 	}
 
@@ -51,59 +51,164 @@ func getJson() string {
 func main() {
 	json := getJson()
 	i := 0
-	fmt.Println(json)
+	// fmt.Println(json)
 
 	for i < len(json) {
 		switch json[i] {
 		case '{':
-			parseObject(json, i, "")
+			res := JsonObject{}
+			res, i = parseObject(json, i, "")
+			fmt.Println(res)
+		case '[':
+			res := JsonArray{}
+			res, i = parseArray(json, i, "")
+			fmt.Println(res)
 		}
+
+		i = skipWhiteSpace(json, i)
 	}
+}
+
+type JsonElement interface {
+	GetKey() string
+	GetValue() (string, map[string]JsonElement, []JsonElement)
+}
+
+type JsonPrimitive struct {
+	Key   string
+	Value string
+}
+
+func (p JsonPrimitive) GetKey() string {
+	return p.Key
+}
+
+func (p JsonPrimitive) GetValue() (string, map[string]JsonElement, []JsonElement) {
+	return p.Value, nil, nil
 }
 
 type JsonObject struct {
 	Key        string
-	Properties map[string]JsonObject
+	Properties map[string]JsonElement
+}
+
+func (o JsonObject) GetKey() string {
+	return o.Key
+}
+
+func (o JsonObject) GetValue() (string, map[string]JsonElement, []JsonElement) {
+	return "", o.Properties, nil
+}
+
+type JsonArray struct {
+	Key        string
+	Properties []JsonElement
+}
+
+func (a JsonArray) GetKey() string {
+	return a.Key
+}
+
+func (a JsonArray) GetValue() (string, map[string]JsonElement, []JsonElement) {
+	return "", nil, a.Properties
+}
+
+func parsePrimitive(json string, i int, key string) (JsonPrimitive, int) {
+	res := JsonPrimitive{Key: key}
+	value := []byte{}
+	if unicode.IsNumber(rune(json[i])) {
+		for ; i < len(json) && unicode.IsNumber(rune(json[i])); i++ {
+			value = append(value, json[i])
+		}
+		res.Value = string(value)
+		return res, i
+
+	} else if unicode.IsLetter(rune(json[i])) {
+		panic("TODO: parse boolean or null not implemented")
+	} else if json[i] == '"' {
+		i += 1 // skip first "
+
+		for ; i < len(json) && json[i] != '"'; i++ {
+			value = append(value, json[i])
+		}
+		res.Value = string(value)
+
+		i += 1 // skip last "
+		return res, i
+
+	} else {
+		panic("Malformed json in parsePrimitive.")
+	}
 }
 
 func parseObject(json string, i int, key string) (JsonObject, int) {
 	i = skipWhiteSpace(json, i+1)
-	res := JsonObject{Key: key, Properties: make(map[string]JsonObject)}
+	res := JsonObject{Key: key, Properties: make(map[string]JsonElement)}
 
-	for i < len(json) {
-		propName, i := readKey(json, i)
-		fmt.Println(propName)
+	for i < len(json) && json[i] != '}' {
+		propName := ""
+		propName, i = readKey(json, i)
 		i = skipWhiteSpace(json, i)
 		if json[i] != ':' {
-			panic("Malformed json.")
+			panic("Malformed json in parseObject.")
 		}
 		i += 1
 
 		i = skipWhiteSpace(json, i)
 
-		if unicode.IsNumber(rune(json[i])) {
-			panic("TODO: parseNumber not implemented")
-		} else if unicode.IsLetter(rune(json[i])) {
-			panic("TODO: parseBoolean not implemented")
-		}
-
 		switch json[i] {
-		case '"':
-			panic("TODO: parseString not implemented")
-			break
-
 		case '{':
 			obj := JsonObject{}
 			obj, i = parseObject(json, i, propName)
-			res.Properties[key] = obj
+			res.Properties[propName] = obj
 			break
 
 		case '[':
-			panic("TODO: parseArray not implemented")
+			obj := JsonArray{}
+			obj, i = parseArray(json, i, propName)
+			res.Properties[propName] = obj
 			break
+
+		default:
+			p := JsonPrimitive{}
+			p, i = parsePrimitive(json, i, propName)
+			res.Properties[propName] = p
 		}
 
-		panic("Unreachable in parseObject switch")
+		if json[i] == ',' {
+			i += 1
+		}
+		// panic("")
+	}
+
+	if json[i] == '}' {
+		i += 1
+	}
+
+	return res, i
+}
+
+func parseArray(json string, i int, key string) (JsonArray, int) {
+	i = skipWhiteSpace(json, i+1)
+	res := JsonArray{Key: key, Properties: []JsonElement{}}
+
+	for i < len(json) && json[i] != ']' {
+		i = skipWhiteSpace(json, i)
+
+		if json[i] == '{' {
+			obj := JsonObject{}
+			obj, i = parseObject(json, i, "")
+			res.Properties = append(res.Properties, obj)
+		} else {
+			p := JsonPrimitive{}
+			p, i = parsePrimitive(json, i, "")
+			res.Properties = append(res.Properties, p)
+		}
+
+		if json[i] == ',' {
+			i += 1
+		}
+		// panic("")
 	}
 
 	return res, i
@@ -112,7 +217,7 @@ func parseObject(json string, i int, key string) (JsonObject, int) {
 func readKey(json string, i int) (string, int) {
 	i = skipWhiteSpace(json, i)
 	if json[i] != '"' {
-		panic(fmt.Sprintf("Expected start of key at position %d", i))
+		panic(fmt.Sprintf("Expected start of key at position %d, found %c", i, json[i]))
 	}
 	i += 1
 
@@ -127,7 +232,7 @@ func readKey(json string, i int) (string, int) {
 
 func skipWhiteSpace(json string, i int) int {
 
-	for unicode.IsSpace(rune(json[i])) {
+	for i < len(json) && unicode.IsSpace(rune(json[i])) {
 		i += 1
 	}
 
