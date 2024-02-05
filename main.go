@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"os"
+	"strings"
 	"unicode"
 )
 
@@ -30,9 +32,9 @@ func fetch(url string, options RequestOptions) (*http.Response, error) {
 	return http.DefaultClient.Do(req)
 }
 
-func getJson() string {
+func getJson(url string) string {
 	res, err := fetch(
-		"https://jsonplaceholder.typicode.com/users",
+		url,
 		RequestOptions{Method: "GET"},
 	)
 
@@ -49,42 +51,104 @@ func getJson() string {
 }
 
 func main() {
-	json := getJson()
+	url := os.Args[1]
+	root := os.Args[2]
+	json := getJson(url)
 	i := 0
 	// fmt.Println(json)
 
-	for i < len(json) {
-		switch json[i] {
-		case '{':
-			res := JsonObject{}
-			res, i = parseObject(json, i, "")
-			fmt.Println(res)
-		case '[':
-			res := JsonArray{}
-			res, i = parseArray(json, i, "")
-			fmt.Println(res)
+	i = skipWhiteSpace(json, i)
+	switch json[i] {
+	case '{':
+		res := JsonObject{}
+		res, i = parseObject(json, i, "")
+		fmt.Println(res.ToString(0))
+		genInterfaces(res, root)
+		break
+
+	case '[':
+		res := JsonArray{}
+		res, i = parseArray(json, i, "")
+		fmt.Println(res.ToString(0))
+
+		if res.Properties[0].IsObject() {
+			genInterfaces(res.Properties[0].(JsonObject), root)
+		}
+		break
+	}
+}
+
+func genInterfaces(obj JsonObject, root string) {
+	types := []JsonObject{}
+	obj.Key = root
+	types = genInterface(obj, types)
+
+	for len(types) > 0 {
+		popped := types[len(types)-1]
+		types = types[:len(types)-1]
+		types = genInterface(popped, types)
+	}
+}
+
+func genInterface(obj JsonObject, types []JsonObject) []JsonObject {
+	fmt.Println("interface " + obj.GetType() + " {")
+	for key := range obj.Properties {
+		if obj.Properties[key].IsObject() {
+			types = append(types, obj.Properties[key].(JsonObject))
 		}
 
-		i = skipWhiteSpace(json, i)
+		fmt.Print("  " + obj.Properties[key].ToTypeString())
 	}
+	fmt.Println("}")
+
+	return types
 }
 
 type JsonElement interface {
 	GetKey() string
+	SetKey(key string)
 	GetValue() (string, map[string]JsonElement, []JsonElement)
+	GetType() string
+	IsObject() bool
+	ToString(level int) string
+	ToTypeString() string
 }
 
 type JsonPrimitive struct {
 	Key   string
 	Value string
+	Type  string
 }
 
 func (p JsonPrimitive) GetKey() string {
 	return p.Key
 }
 
+func (p JsonPrimitive) SetKey(key string) {
+	p.Key = key
+}
+
 func (p JsonPrimitive) GetValue() (string, map[string]JsonElement, []JsonElement) {
 	return p.Value, nil, nil
+}
+
+func (p JsonPrimitive) GetType() string {
+	return p.Type
+}
+
+func (p JsonPrimitive) IsObject() bool {
+	return false
+}
+
+func (p JsonPrimitive) ToString(level int) string {
+	padding := strings.Repeat(" ", level*2)
+
+	return padding + p.Key + ": (" + p.GetType() + ") " + p.Value + ",\n"
+}
+
+func (p JsonPrimitive) ToTypeString() string {
+
+	return p.Key + ": " + p.GetType() + ",\n"
 }
 
 type JsonObject struct {
@@ -96,8 +160,66 @@ func (o JsonObject) GetKey() string {
 	return o.Key
 }
 
+func (o JsonObject) SetKey(key string) {
+	o.Key = key
+}
+
 func (o JsonObject) GetValue() (string, map[string]JsonElement, []JsonElement) {
 	return "", o.Properties, nil
+}
+
+func (o JsonObject) GetType() string {
+	if o.Key == "" {
+		return "Root"
+	}
+
+	res := ""
+	if strings.ContainsAny(o.Key, "_-") {
+		for i := 0; i < len(o.Key); i++ {
+			if o.Key[i] == '_' || o.Key[i] == '-' {
+				i += 1
+				res += strings.ToUpper(string(o.Key[i]))
+			} else if i == 0 {
+				res += strings.ToUpper(string(o.Key[i]))
+			} else {
+				res += string(o.Key[i])
+			}
+		}
+	} else {
+		res += strings.ToUpper(string(o.Key[0]))
+		res += o.Key[1:len(o.Key)]
+	}
+
+	return res
+}
+
+func (o JsonObject) IsObject() bool {
+	return true
+}
+
+func (o JsonObject) ToString(level int) string {
+	padding := strings.Repeat(" ", level*2)
+	res := padding
+
+	if o.Key != "" {
+		res += o.Key + ": "
+	}
+	res += "(" + o.GetType() + ") "
+
+	res += "{\n"
+
+	for key := range o.Properties {
+		res += o.Properties[key].ToString(level + 1)
+	}
+
+	res += padding + "},\n"
+
+	return res
+}
+
+func (o JsonObject) ToTypeString() string {
+
+	return o.Key + ": " + o.GetType() + ",\n"
 }
 
 type JsonArray struct {
@@ -109,14 +231,59 @@ func (a JsonArray) GetKey() string {
 	return a.Key
 }
 
+func (a JsonArray) SetKey(key string) {
+	a.Key = key
+}
+
 func (a JsonArray) GetValue() (string, map[string]JsonElement, []JsonElement) {
 	return "", nil, a.Properties
+}
+
+func (a JsonArray) GetType() string {
+	return a.Properties[0].GetType() + "[]"
+}
+
+func (a JsonArray) IsObject() bool {
+	return false
+}
+
+func (a JsonArray) ToString(level int) string {
+	padding := strings.Repeat(" ", level*2)
+	res := padding
+
+	if a.Key != "" {
+		res += a.Key + ": "
+	}
+	res += "(" + a.GetType() + ") "
+
+	res += "[\n"
+
+	for index := range a.Properties {
+		res += a.Properties[index].ToString(level + 1)
+	}
+
+	res += padding + "],\n"
+
+	return res
+}
+
+func (a JsonArray) ToTypeString() string {
+	res := "[\n"
+
+	for key := range a.Properties {
+		res += a.Properties[key].ToTypeString()
+	}
+
+	res += "],\n"
+
+	return res
 }
 
 func parsePrimitive(json string, i int, key string) (JsonPrimitive, int) {
 	res := JsonPrimitive{Key: key}
 	value := []byte{}
 	if unicode.IsNumber(rune(json[i])) {
+		res.Type = "number"
 		for ; i < len(json) && unicode.IsNumber(rune(json[i])); i++ {
 			value = append(value, json[i])
 		}
@@ -124,8 +291,19 @@ func parsePrimitive(json string, i int, key string) (JsonPrimitive, int) {
 		return res, i
 
 	} else if unicode.IsLetter(rune(json[i])) {
-		panic("TODO: parse boolean or null not implemented")
+		for ; i < len(json) && unicode.IsLetter(rune(json[i])); i++ {
+			value = append(value, json[i])
+		}
+		res.Value = string(value)
+		if res.Value == "null" {
+			res.Type = "null"
+		} else {
+			res.Type = "boolean"
+		}
+		return res, i
+
 	} else if json[i] == '"' {
+		res.Type = "string"
 		i += 1 // skip first "
 
 		for ; i < len(json) && json[i] != '"'; i++ {
@@ -178,6 +356,7 @@ func parseObject(json string, i int, key string) (JsonObject, int) {
 		if json[i] == ',' {
 			i += 1
 		}
+		i = skipWhiteSpace(json, i)
 		// panic("")
 	}
 
@@ -208,6 +387,7 @@ func parseArray(json string, i int, key string) (JsonArray, int) {
 		if json[i] == ',' {
 			i += 1
 		}
+		i = skipWhiteSpace(json, i)
 		// panic("")
 	}
 
@@ -217,7 +397,7 @@ func parseArray(json string, i int, key string) (JsonArray, int) {
 func readKey(json string, i int) (string, int) {
 	i = skipWhiteSpace(json, i)
 	if json[i] != '"' {
-		panic(fmt.Sprintf("Expected start of key at position %d, found %c", i, json[i]))
+		panic(fmt.Sprintf("Expected start of key at position %d, found %c\nslice: %v", i, json[i], json[i-10:i+10]))
 	}
 	i += 1
 
