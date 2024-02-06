@@ -1,0 +1,13 @@
+{
+	"outFile": "types.d.ts"
+	"endpoints": [
+		{
+			"rootType": "User",
+			"url": "https://jsonplaceholder.typicode.com/users/1",
+			"headers": {
+				"Accept": "application/json"
+			},
+			"method": "GET"
+		}
+	]
+}

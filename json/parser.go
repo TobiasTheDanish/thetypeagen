@@ -282,6 +282,7 @@ func parseObject(json string, i int, key string) (JsonObject, int) {
 	if json[i] == '}' {
 		i += 1
 	}
+	i = skipWhiteSpace(json, i)
 
 	return res, i
 }
@@ -309,6 +310,10 @@ func parseArray(json string, i int, key string) (JsonArray, int) {
 		i = skipWhiteSpace(json, i)
 		// panic("")
 	}
+	if json[i] == ']' {
+		i += 1
+	}
+	i = skipWhiteSpace(json, i)
 
 	return res, i
 }
