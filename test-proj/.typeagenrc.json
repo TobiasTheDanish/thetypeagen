@@ -1,4 +1,5 @@
 {
+	"envFile": ".env",
 	"outFile": "types.d.ts",
 	"endpoints": [
 		{

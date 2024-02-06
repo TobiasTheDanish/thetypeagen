@@ -3,10 +3,12 @@ package config
 import (
 	"bufio"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"os"
 	"strconv"
+	"strings"
 	"tobiasthedanish/thetypeagen/json"
 )
 
@@ -102,6 +104,13 @@ func ParseConfig() (*Config, error) {
 	props := obj.Properties
 
 	outFile := getOptionalPrimitiveProp("outFile", props)
+	envFile := getOptionalPrimitiveProp("envFile", props)
+
+	envVars := parseEnvFile(envFile)
+
+	for key, val := range envVars {
+		fmt.Println(fmt.Sprintf("%s=%s", key, val))
+	}
 
 	config := Config{
 		Output:    outFile,
@@ -189,4 +198,30 @@ func getOptionalPrimitiveProp(propName string, props map[string]json.JsonElement
 	} else {
 		return ""
 	}
+}
+
+func parseEnvFile(filename string) map[string]string {
+	envVars := make(map[string]string)
+
+	file, err := os.Open(filename)
+	if err != nil {
+		return nil
+	}
+
+	scanner := bufio.NewScanner(file)
+
+	for scanner.Scan() {
+		line := scanner.Text()
+		if len(strings.Trim(line, " \n\r\t")) == 0 {
+			continue
+		}
+
+		keyVal := strings.Split(line, "=")
+		key := strings.Trim(keyVal[0], " \n\r\t")
+		val := strings.Trim(keyVal[1], " \n\r\t")
+
+		envVars[key] = val
+	}
+
+	return envVars
 }
