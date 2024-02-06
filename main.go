@@ -39,7 +39,9 @@ func main() {
 		jsonStr, err := config.GetBodyAsString(res)
 		check(err)
 
-		obj, arr := json.ParseJson(jsonStr)
+		parser := json.NewParser(jsonStr)
+
+		obj, arr := parser.ParseJson()
 		if obj != nil {
 			// fmt.Println(obj.ToString(0))
 			genInterfaces(output, *obj, epc.RootType)

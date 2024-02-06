@@ -1,4 +1,5 @@
 interface User {
+  id: number,
   name: string,
   username: string,
   email: string,
@@ -6,7 +7,6 @@ interface User {
   phone: string,
   website: string,
   company: Company,
-  id: number,
 }
 interface Company {
   name: string,
@@ -14,13 +14,13 @@ interface Company {
   bs: string,
 }
 interface Address {
+  street: string,
   suite: string,
   city: string,
   zipcode: string,
   geo: Geo,
-  street: string,
 }
 interface Geo {
-  lng: string,
   lat: string,
+  lng: string,
 }

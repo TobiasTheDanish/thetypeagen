@@ -6,17 +6,26 @@ import (
 	"unicode"
 )
 
-func ParseJson(json string) (*JsonObject, *JsonArray) {
-	i := skipWhiteSpace(json, 0)
-	switch json[i] {
+type JsonParser struct {
+	json string
+	i    int
+}
+
+func NewParser(json string) JsonParser {
+	return JsonParser{json: json, i: 0}
+}
+
+func (p *JsonParser) ParseJson() (*JsonObject, *JsonArray) {
+	p.skipWhiteSpace()
+	switch p.json[p.i] {
 	case '{':
 		res := JsonObject{}
-		res, i = parseObject(json, i, "")
+		res = p.parseObject("")
 		return &res, nil
 
 	case '[':
 		res := JsonArray{}
-		res, i = parseArray(json, i, "")
+		res = p.parseArray("")
 		return nil, &res
 	}
 
@@ -198,20 +207,20 @@ func (a JsonArray) ToTypeString() string {
 	return res
 }
 
-func parsePrimitive(json string, i int, key string) (JsonPrimitive, int) {
+func (p *JsonParser) parsePrimitive(key string) JsonPrimitive {
 	res := JsonPrimitive{Key: key}
 	value := []byte{}
-	if unicode.IsNumber(rune(json[i])) {
+	if unicode.IsNumber(rune(p.json[p.i])) {
 		res.Type = "number"
-		for ; i < len(json) && unicode.IsNumber(rune(json[i])); i++ {
-			value = append(value, json[i])
+		for ; p.i < len(p.json) && unicode.IsNumber(rune(p.json[p.i])); p.i++ {
+			value = append(value, p.json[p.i])
 		}
 		res.Value = string(value)
-		return res, i
+		return res
 
-	} else if unicode.IsLetter(rune(json[i])) {
-		for ; i < len(json) && unicode.IsLetter(rune(json[i])); i++ {
-			value = append(value, json[i])
+	} else if unicode.IsLetter(rune(p.json[p.i])) {
+		for ; p.i < len(p.json) && unicode.IsLetter(rune(p.json[p.i])); p.i++ {
+			value = append(value, p.json[p.i])
 		}
 		res.Value = string(value)
 		if res.Value == "null" {
@@ -219,126 +228,117 @@ func parsePrimitive(json string, i int, key string) (JsonPrimitive, int) {
 		} else {
 			res.Type = "boolean"
 		}
-		return res, i
+		return res
 
-	} else if json[i] == '"' {
+	} else if p.json[p.i] == '"' {
 		res.Type = "string"
-		i += 1 // skip first "
+		p.i += 1 // skip first "
 
-		for ; i < len(json) && json[i] != '"'; i++ {
-			value = append(value, json[i])
+		for ; p.i < len(p.json) && p.json[p.i] != '"'; p.i++ {
+			value = append(value, p.json[p.i])
 		}
 		res.Value = string(value)
 
-		i += 1 // skip last "
-		return res, i
+		p.i += 1 // skip last "
+		return res
 
 	} else {
 		panic("Malformed json in parsePrimitive.")
 	}
 }
 
-func parseObject(json string, i int, key string) (JsonObject, int) {
-	i = skipWhiteSpace(json, i+1)
+func (p *JsonParser) parseObject(key string) JsonObject {
+	p.i++
+	p.skipWhiteSpace()
 	res := JsonObject{Key: key, Properties: make(map[string]JsonElement)}
 
-	for i < len(json) && json[i] != '}' {
-		propName := ""
-		propName, i = readKey(json, i)
-		i = skipWhiteSpace(json, i)
-		if json[i] != ':' {
-			panic("Malformed json in parseObject.")
+	for p.i < len(p.json) && p.json[p.i] != '}' {
+		propName := p.readKey()
+		p.skipWhiteSpace()
+		if p.json[p.i] != ':' {
+			fmt.Println(p.json[p.i:])
+			panic(fmt.Sprintf("Malformed json in parseObject. index: '%d', found '%s', expected ':'.", p.i, string(p.json[p.i])))
 		}
-		i += 1
+		p.i += 1
 
-		i = skipWhiteSpace(json, i)
+		p.skipWhiteSpace()
 
-		switch json[i] {
+		switch p.json[p.i] {
 		case '{':
-			obj := JsonObject{}
-			obj, i = parseObject(json, i, propName)
-			res.Properties[propName] = obj
+			res.Properties[propName] = p.parseObject(propName)
 			break
 
 		case '[':
-			obj := JsonArray{}
-			obj, i = parseArray(json, i, propName)
-			res.Properties[propName] = obj
+			res.Properties[propName] = p.parseArray(propName)
 			break
 
 		default:
-			p := JsonPrimitive{}
-			p, i = parsePrimitive(json, i, propName)
-			res.Properties[propName] = p
+			res.Properties[propName] = p.parsePrimitive(propName)
+			break
 		}
 
-		if json[i] == ',' {
-			i += 1
+		if p.json[p.i] == ',' {
+			p.i += 1
 		}
-		i = skipWhiteSpace(json, i)
+		p.skipWhiteSpace()
 		// panic("")
 	}
 
-	if json[i] == '}' {
-		i += 1
+	if p.json[p.i] == '}' {
+		p.i += 1
 	}
-	i = skipWhiteSpace(json, i)
+	p.skipWhiteSpace()
 
-	return res, i
+	return res
 }
 
-func parseArray(json string, i int, key string) (JsonArray, int) {
-	i = skipWhiteSpace(json, i+1)
+func (p *JsonParser) parseArray(key string) JsonArray {
+	p.i++
+	p.skipWhiteSpace()
 	res := JsonArray{Key: key, Properties: []JsonElement{}}
 
-	for i < len(json) && json[i] != ']' {
-		i = skipWhiteSpace(json, i)
+	for p.i < len(p.json) && p.json[p.i] != ']' {
+		p.skipWhiteSpace()
 
-		if json[i] == '{' {
-			obj := JsonObject{}
-			obj, i = parseObject(json, i, "")
-			res.Properties = append(res.Properties, obj)
+		if p.json[p.i] == '{' {
+			res.Properties = append(res.Properties, p.parseObject(""))
 		} else {
-			p := JsonPrimitive{}
-			p, i = parsePrimitive(json, i, "")
-			res.Properties = append(res.Properties, p)
+			res.Properties = append(res.Properties, p.parsePrimitive(""))
 		}
 
-		if json[i] == ',' {
-			i += 1
+		if p.json[p.i] == ',' {
+			p.i += 1
 		}
-		i = skipWhiteSpace(json, i)
+		p.skipWhiteSpace()
 		// panic("")
 	}
-	if json[i] == ']' {
-		i += 1
+	if p.json[p.i] == ']' {
+		p.i += 1
 	}
-	i = skipWhiteSpace(json, i)
+	p.skipWhiteSpace()
 
-	return res, i
+	return res
 }
 
-func readKey(json string, i int) (string, int) {
-	i = skipWhiteSpace(json, i)
-	if json[i] != '"' {
-		panic(fmt.Sprintf("Expected start of key at position %d, found %c\nslice: %v", i, json[i], json[i-10:i+10]))
+func (p *JsonParser) readKey() string {
+	p.skipWhiteSpace()
+	if p.json[p.i] != '"' {
+		panic(fmt.Sprintf("Expected start of key at position %d, found %c\n", p.i, p.json[p.i]))
 	}
-	i += 1
+	p.i += 1
 
 	key := []byte{}
-	for json[i] != '"' {
-		key = append(key, json[i])
-		i += 1
+	for p.json[p.i] != '"' {
+		key = append(key, p.json[p.i])
+		p.i += 1
 	}
+	p.i += 1
 
-	return string(key), i + 1
+	return string(key)
 }
 
-func skipWhiteSpace(json string, i int) int {
-
-	for i < len(json) && unicode.IsSpace(rune(json[i])) {
-		i += 1
+func (p *JsonParser) skipWhiteSpace() {
+	for p.i < len(p.json) && unicode.IsSpace(rune(p.json[p.i])) {
+		p.i += 1
 	}
-
-	return i
 }

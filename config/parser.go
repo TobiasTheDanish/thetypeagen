@@ -92,8 +92,9 @@ func ParseConfig() (*Config, error) {
 	}
 
 	configStr := string(bytes)
+	parser := json.NewParser(configStr)
 
-	obj, arr := json.ParseJson(configStr)
+	obj, arr := parser.ParseJson()
 	if arr != nil {
 		return nil, errors.New("Config is expected to start with a JSON object, found JSON array")
 	}
