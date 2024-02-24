@@ -4,7 +4,15 @@
 	"endpoints": [
 		{
 			"rootType": "User",
-			"url": "https://jsonplaceholder.typicode.com/users/1",
+			"url": "${BASE_URL}/users/1",
+			"method": "GET",
+			"headers": {
+				"Accept": "application/json"
+			}
+		},
+		{
+			"rootType": "Album",
+			"url": "${BASE_URL}/users/1/albums",
 			"method": "GET",
 			"headers": {
 				"Accept": "application/json"
