@@ -69,12 +69,12 @@ func GetBodyAsString(res *http.Response) (string, error) {
 	return body, nil
 }
 
-func ParseConfig() (*Config, error) {
+func readFile(name string) ([]byte, error) {
 	wd, err := os.Getwd()
 	if err != nil {
 		return nil, err
 	}
-	f, err := os.Open(wd + "/.typeagenrc.json")
+	f, err := os.Open(wd + name)
 	if err != nil {
 		return nil, err
 	}
@@ -93,37 +93,62 @@ func ParseConfig() (*Config, error) {
 		return nil, err
 	}
 
+	return bytes, nil
+}
+
+func ParseConfig() (*Config, error) {
+	bytes, err := readFile("/.typeagenrc.json")
+	if err != nil {
+		return nil, err
+	}
+
 	configStr := string(bytes)
 	parser := json.NewParser(configStr)
 
-	obj, arr := parser.ParseJson()
-	if arr != nil {
-		return nil, errors.New("Config is expected to start with a JSON object, found JSON array")
+	if parser.GetType() != json.Object {
+		return nil, errors.New("Config should always be a json object")
 	}
 
-	props := obj.Properties
+	var (
+		environment map[string]string
+		outfile     string
+		endpoints   []json.JsonElement
+	)
+	for parser.CanParse() {
+		next := parser.PeekPropertyName()
 
-	outFile := getOptionalPrimitiveProp("outFile", props)
-	envFile := getOptionalPrimitiveProp("envFile", props)
+		switch next {
+		case "envFile":
+			_, _, env := parser.ParseProperty()
+			if env == nil {
+				return nil, errors.New("Property 'envFile' is expected to be a string")
+			}
+			environment = parseEnvFile(env.Value)
+			break
 
-	envVars := parseEnvFile(envFile)
+		case "outFile":
+			_, _, out := parser.ParsePropertyWithEnv(environment)
+			if out == nil {
+				return nil, errors.New("Property 'outFile' is expected to be a string")
+			}
+			outfile = out.Value
+			break
 
-	for key, val := range envVars {
-		fmt.Println(fmt.Sprintf("%s=%s", key, val))
+		case "endpoints":
+			_, ep, _ := parser.ParsePropertyWithEnv(environment)
+			if ep == nil {
+				return nil, errors.New("Property 'endpoints' is expected to be an array")
+			}
+			endpoints = ep.Properties
+		}
 	}
 
 	config := Config{
-		Output:    outFile,
+		Output:    outfile,
 		Endpoints: []EndpointConfig{},
 	}
 
-	endpoints := props["endpoints"]
-	_, _, arrVal := endpoints.GetValue()
-	if arrVal == nil {
-		return nil, errors.New("Expected 'endpoints' to be an array.")
-	}
-
-	for _, ep := range arrVal {
+	for _, ep := range endpoints {
 		if !ep.IsObject() {
 			return nil, errors.New("Expected 'endpoints' to be an array of objects.")
 		}

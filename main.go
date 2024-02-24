@@ -17,7 +17,7 @@ func check(err error) {
 }
 
 func main() {
-	cfg, err := config.ParseConfig()
+	cfg, err := config.ParseConfigWithEnv()
 	check(err)
 	// fmt.Println(cfg.ToString())
 
@@ -78,7 +78,7 @@ func genInterface(out io.Writer, obj json.JsonObject, types []json.JsonObject) [
 
 		fmt.Fprint(out, "  "+obj.Properties[key].ToTypeString())
 	}
-	fmt.Fprintln(out, "}")
+	fmt.Fprintln(out, "}\n")
 
 	return types
 }

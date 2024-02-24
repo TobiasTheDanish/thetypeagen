@@ -15,17 +15,110 @@ func NewParser(json string) JsonParser {
 	return JsonParser{json: json, i: 0}
 }
 
+type JsonType = int
+
+const (
+	Object  int = 0
+	Array       = 1
+	Invalid     = -1
+)
+
+func (p *JsonParser) GetType() JsonType {
+	if p.i != 0 {
+		return Invalid
+	}
+
+	char := p.json[p.i]
+	p.i += 1
+
+	p.skipWhiteSpace()
+	switch char {
+	case '{':
+		return Object
+
+	case '[':
+		return Array
+	}
+
+	return Invalid
+}
+
+func (p *JsonParser) CanParse() bool {
+	p.skipWhiteSpace()
+	return p.i < len(p.json) && p.json[p.i] != '}'
+}
+
+func (p *JsonParser) PeekPropertyName() string {
+	start := p.i
+	nextProp := p.readKey()
+	p.i = start
+
+	return nextProp
+}
+
+func (p *JsonParser) ParsePropertyWithEnv(env map[string]string) (*JsonObject, *JsonArray, *JsonPrimitive) {
+	propName := p.parseKey()
+
+	switch p.json[p.i] {
+	case '{':
+		res := JsonObject{}
+		res = p.parseObject(propName, env)
+
+		if rune(p.json[p.i]) == ',' {
+			p.i += 1
+		}
+		return &res, nil, nil
+
+	case '[':
+		res := JsonArray{}
+		res = p.parseArray(propName, env)
+
+		if rune(p.json[p.i]) == ',' {
+			p.i += 1
+		}
+		return nil, &res, nil
+
+	default:
+		res := JsonPrimitive{}
+		res = p.parsePrimitive(propName, env)
+
+		if rune(p.json[p.i]) == ',' {
+			p.i += 1
+		}
+		return nil, nil, &res
+	}
+
+}
+
+func (p *JsonParser) ParseProperty() (*JsonObject, *JsonArray, *JsonPrimitive) {
+	return p.ParsePropertyWithEnv(nil)
+}
+
+func (p *JsonParser) parseKey() string {
+	propName := p.readKey()
+	p.skipWhiteSpace()
+	if p.json[p.i] != ':' {
+		fmt.Println(p.json[p.i:])
+		panic(fmt.Sprintf("Malformed json. index: '%d', found '%s', expected ':'.", p.i, string(p.json[p.i])))
+	}
+	p.i += 1
+
+	p.skipWhiteSpace()
+
+	return propName
+}
+
 func (p *JsonParser) ParseJson() (*JsonObject, *JsonArray) {
 	p.skipWhiteSpace()
 	switch p.json[p.i] {
 	case '{':
 		res := JsonObject{}
-		res = p.parseObject("")
+		res = p.parseObject("", nil)
 		return &res, nil
 
 	case '[':
 		res := JsonArray{}
-		res = p.parseArray("")
+		res = p.parseArray("", nil)
 		return nil, &res
 	}
 
@@ -207,7 +300,7 @@ func (a JsonArray) ToTypeString() string {
 	return res
 }
 
-func (p *JsonParser) parsePrimitive(key string) JsonPrimitive {
+func (p *JsonParser) parsePrimitive(key string, env map[string]string) JsonPrimitive {
 	res := JsonPrimitive{Key: key}
 	value := []byte{}
 	if unicode.IsNumber(rune(p.json[p.i])) {
@@ -235,8 +328,29 @@ func (p *JsonParser) parsePrimitive(key string) JsonPrimitive {
 		p.i += 1 // skip first "
 
 		for ; p.i < len(p.json) && p.json[p.i] != '"'; p.i++ {
-			value = append(value, p.json[p.i])
+			char := p.json[p.i]
+			if env != nil && (rune(char) == '$' && rune(p.json[p.i+1]) == '{') {
+				envKey := []byte{}
+				p.i += 2
+				for ; p.i < len(p.json) && p.json[p.i] != '}'; p.i++ {
+					if rune(p.json[p.i]) != '"' {
+						envKey = append(envKey, p.json[p.i])
+					} else {
+						panic("Malformed environment variable, missing closing '}'")
+					}
+				}
+				fmt.Println("envKey:", string(envKey))
+				fmt.Println("envVal:", env[string(envKey)])
+
+				value = append(value, []byte(env[string(envKey)])...)
+			} else if rune(char) == '\\' {
+				p.i += 1
+				value = append(value, p.json[p.i])
+			} else {
+				value = append(value, char)
+			}
 		}
+
 		res.Value = string(value)
 
 		p.i += 1 // skip last "
@@ -247,33 +361,25 @@ func (p *JsonParser) parsePrimitive(key string) JsonPrimitive {
 	}
 }
 
-func (p *JsonParser) parseObject(key string) JsonObject {
+func (p *JsonParser) parseObject(key string, env map[string]string) JsonObject {
 	p.i++
 	p.skipWhiteSpace()
 	res := JsonObject{Key: key, Properties: make(map[string]JsonElement)}
 
 	for p.i < len(p.json) && p.json[p.i] != '}' {
-		propName := p.readKey()
-		p.skipWhiteSpace()
-		if p.json[p.i] != ':' {
-			fmt.Println(p.json[p.i:])
-			panic(fmt.Sprintf("Malformed json in parseObject. index: '%d', found '%s', expected ':'.", p.i, string(p.json[p.i])))
-		}
-		p.i += 1
-
-		p.skipWhiteSpace()
+		propName := p.parseKey()
 
 		switch p.json[p.i] {
 		case '{':
-			res.Properties[propName] = p.parseObject(propName)
+			res.Properties[propName] = p.parseObject(propName, env)
 			break
 
 		case '[':
-			res.Properties[propName] = p.parseArray(propName)
+			res.Properties[propName] = p.parseArray(propName, env)
 			break
 
 		default:
-			res.Properties[propName] = p.parsePrimitive(propName)
+			res.Properties[propName] = p.parsePrimitive(propName, env)
 			break
 		}
 
@@ -292,7 +398,7 @@ func (p *JsonParser) parseObject(key string) JsonObject {
 	return res
 }
 
-func (p *JsonParser) parseArray(key string) JsonArray {
+func (p *JsonParser) parseArray(key string, env map[string]string) JsonArray {
 	p.i++
 	p.skipWhiteSpace()
 	res := JsonArray{Key: key, Properties: []JsonElement{}}
@@ -301,9 +407,9 @@ func (p *JsonParser) parseArray(key string) JsonArray {
 		p.skipWhiteSpace()
 
 		if p.json[p.i] == '{' {
-			res.Properties = append(res.Properties, p.parseObject(""))
+			res.Properties = append(res.Properties, p.parseObject("", env))
 		} else {
-			res.Properties = append(res.Properties, p.parsePrimitive(""))
+			res.Properties = append(res.Properties, p.parsePrimitive("", env))
 		}
 
 		if p.json[p.i] == ',' {
